@@ -1,0 +1,16 @@
+{
+  "name": "qa-form-autofill",
+  "version": "1.0.0",
+  "description": "Chrome Extension for QA Form Autofill",
+  "scripts": {
+    "build": "node build.js"
+  },
+  "dependencies": {
+    "@faker-js/faker": "^8.4.1"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.260",
+    "esbuild": "^0.20.2",
+    "typescript": "^5.4.5"
+  }
+}

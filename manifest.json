@@ -1,0 +1,41 @@
+{
+    "manifest_version": 3,
+    "name": "QA Form Autofill",
+    "version": "1.0.0",
+    "description": "Smart form autofill tool with faked data and profiles for QA",
+    "permissions": [
+        "storage",
+        "activeTab",
+        "scripting"
+    ],
+    "host_permissions": [
+        "<all_urls>"
+    ],
+    "background": {
+        "service_worker": "background.js"
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "js": [
+                "contentScript.js"
+            ],
+            "run_at": "document_idle"
+        }
+    ],
+    "action": {
+        "default_popup": "popup.html",
+        "default_title": "Open Autofill Settings"
+    },
+    "commands": {
+        "autofill_form": {
+            "suggested_key": {
+                "default": "Ctrl+Shift+F",
+                "mac": "Command+Shift+F"
+            },
+            "description": "Autofill entire form in active tab"
+        }
+    }
+}

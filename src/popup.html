@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>QA Autofill</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <h2>QA Form Autofill</h2>
+    
+    <div class="form-group">
+      <label for="profileSelect">Profile:</label>
+      <select id="profileSelect">
+        <option value="random">Random (Faker)</option>
+        <option value="default">Default QA</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="dropdownStrategySelect">Dropdown strategy:</label>
+      <select id="dropdownStrategySelect">
+        <option value="first" selected>First option</option>
+        <option value="second">Second option</option>
+        <option value="random">Random option</option>
+      </select>
+    </div>
+
+    <div class="form-group horizontal-checks">
+      <label><input type="checkbox" id="autoSubmitToggle"> Auto submit</label>
+      <label><input type="checkbox" id="dryRunToggle"> Dry run</label>
+      <label><input type="checkbox" id="debugModeToggle"> Debug</label>
+    </div>
+
+    <div class="form-group">
+      <label for="toggleDenylistInput">Toggle denylist (comma):</label>
+      <input id="toggleDenylistInput" type="text" placeholder="none,no,not applicable,prefer not,decline">
+    </div>
+
+    <button id="fillBtn" class="btn">Fill Form</button>
+    <button id="refreshLearnedBtn" class="btn secondary">Refresh Learned</button>
+    <button id="resetLearnedBtn" class="btn secondary danger">Reset Learned</button>
+
+    <div class="form-group">
+      <label for="learnedOutput">Learned answers JSON:</label>
+      <textarea id="learnedOutput" rows="6" placeholder="Learned data appears here"></textarea>
+    </div>
+
+    <details class="dropdown-panel">
+      <summary>Export Config</summary>
+      <div class="dropdown-content">
+        <button id="exportConfigBtn" class="btn secondary">Generate Export JSON</button>
+        <textarea id="configDataInput" rows="5" placeholder='{"selectedProfile":"default", ...}'></textarea>
+      </div>
+    </details>
+
+    <details class="dropdown-panel">
+      <summary>Import Config</summary>
+      <div class="dropdown-content">
+        <button id="importConfigBtn" class="btn secondary">Import JSON From Box</button>
+        <small>Paste JSON into the Export box above, then import.</small>
+      </div>
+    </details>
+
+    <div class="form-group">
+      <label for="reportOutput">Last report:</label>
+      <textarea id="reportOutput" rows="6" readonly></textarea>
+    </div>
+
+    <div class="footer">
+      <small>Shortcut: Ctrl+Shift+F</small>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
