@@ -26,45 +26,54 @@
       </select>
     </div>
 
-    <div class="form-group horizontal-checks">
-      <label><input type="checkbox" id="autoSubmitToggle"> Auto submit</label>
-      <label><input type="checkbox" id="dryRunToggle"> Dry run</label>
-      <label><input type="checkbox" id="debugModeToggle"> Debug</label>
-    </div>
-
-    <div class="form-group">
-      <label for="toggleDenylistInput">Toggle denylist (comma):</label>
-      <input id="toggleDenylistInput" type="text" placeholder="none,no,not applicable,prefer not,decline">
-    </div>
-
     <button id="fillBtn" class="btn">Fill Form</button>
-    <button id="refreshLearnedBtn" class="btn secondary">Refresh Learned</button>
-    <button id="resetLearnedBtn" class="btn secondary danger">Reset Learned</button>
+    <button id="moreBtn" class="btn secondary">More</button>
 
-    <div class="form-group">
-      <label for="learnedOutput">Learned answers JSON:</label>
-      <textarea id="learnedOutput" rows="6" placeholder="Learned data appears here"></textarea>
-    </div>
-
-    <details class="dropdown-panel">
-      <summary>Export Config</summary>
-      <div class="dropdown-content">
-        <button id="exportConfigBtn" class="btn secondary">Generate Export JSON</button>
-        <textarea id="configDataInput" rows="5" placeholder='{"selectedProfile":"default", ...}'></textarea>
+    <div id="advancedSection" class="advanced-collapsed">
+      <div class="form-group horizontal-checks">
+        <label><input type="checkbox" id="autoSubmitToggle"> Auto submit</label>
+        <label><input type="checkbox" id="dryRunToggle"> Dry run</label>
+        <label><input type="checkbox" id="debugModeToggle"> Debug</label>
       </div>
-    </details>
 
-    <details class="dropdown-panel">
-      <summary>Import Config</summary>
-      <div class="dropdown-content">
-        <button id="importConfigBtn" class="btn secondary">Import JSON From Box</button>
-        <small>Paste JSON into the Export box above, then import.</small>
+      <div class="form-group">
+        <label for="toggleDenylistInput">Toggle denylist (comma):</label>
+        <input id="toggleDenylistInput" type="text" placeholder="none,no,not applicable,prefer not,decline">
       </div>
-    </details>
 
-    <div class="form-group">
-      <label for="reportOutput">Last report:</label>
-      <textarea id="reportOutput" rows="6" readonly></textarea>
+      <div class="form-group">
+        <label for="fieldOverridesInput">Field overrides (key=value, each new line):</label>
+        <textarea id="fieldOverridesInput" rows="4" placeholder="firstName=John&#10;lastName=Doe&#10;email=qa@example.com"></textarea>
+      </div>
+
+      <button id="refreshLearnedBtn" class="btn secondary">Refresh Learned</button>
+      <button id="resetLearnedBtn" class="btn secondary danger">Reset Learned</button>
+
+      <div class="form-group">
+        <label for="learnedOutput">Learned answers JSON:</label>
+        <textarea id="learnedOutput" rows="6" placeholder="Learned data appears here"></textarea>
+      </div>
+
+      <details class="dropdown-panel">
+        <summary>Export Config</summary>
+        <div class="dropdown-content">
+          <button id="exportConfigBtn" class="btn secondary">Generate Export JSON</button>
+          <textarea id="configDataInput" rows="5" placeholder='{"selectedProfile":"default", ...}'></textarea>
+        </div>
+      </details>
+
+      <details class="dropdown-panel">
+        <summary>Import Config</summary>
+        <div class="dropdown-content">
+          <button id="importConfigBtn" class="btn secondary">Import JSON From Box</button>
+          <small>Paste JSON into the Export box above, then import.</small>
+        </div>
+      </details>
+
+      <div class="form-group">
+        <label for="reportOutput">Last report:</label>
+        <textarea id="reportOutput" rows="6" readonly></textarea>
+      </div>
     </div>
 
     <div class="footer">

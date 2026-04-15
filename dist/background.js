@@ -11,7 +11,8 @@
         "selectedAutoSubmit",
         "selectedDryRun",
         "selectedDebugMode",
-        "selectedToggleDenylist"
+        "selectedToggleDenylist",
+        "selectedFieldOverrides"
       ], (result) => {
         const profile = result.selectedProfile || "random";
         const formType = result.selectedFormType || "general";
@@ -20,6 +21,7 @@
         const dryRun = Boolean(result.selectedDryRun);
         const debugMode = Boolean(result.selectedDebugMode);
         const toggleDenylist = result.selectedToggleDenylist || "none,no,not applicable,prefer not,decline";
+        const fieldOverrides = result.selectedFieldOverrides && typeof result.selectedFieldOverrides === "object" ? result.selectedFieldOverrides : {};
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
           const activeTab = tabs[0];
           if (activeTab && activeTab.id) {
@@ -31,7 +33,8 @@
               autoSubmit,
               dryRun,
               debugMode,
-              toggleDenylist
+              toggleDenylist,
+              fieldOverrides
             });
           }
         });

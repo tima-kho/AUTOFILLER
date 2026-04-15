@@ -14,8 +14,29 @@ type AutofillSettings = {
     dryRun: boolean;
     debugMode: boolean;
     toggleDenylist: string;
+    fieldOverrides: Record<string, string>;
 };
 type FillSource = 'learned' | 'mapped' | 'fallback';
+type LearnedContextRecord = {
+    formType: FormType;
+    urlPattern: string;
+    stepKey: string;
+    sectionKey: string;
+    fieldCandidates: string[];
+    value: string;
+    updatedAt: number;
+};
+type FormRecipe = {
+    id: string;
+    formType: FormType;
+    urlPatterns: string[];
+    fieldOverrides: Record<string, string>;
+};
+type NameSet = {
+    firstName: string;
+    lastName: string;
+    updatedAt: number;
+};
 type AutofillReport = {
     startedAt: string;
     formType: FormType;
@@ -28,8 +49,9 @@ type AutofillReport = {
 };
 
 const LEARNED_STORAGE_KEY_BY_FORM = 'learnedFieldAnswersByForm';
-const LEGACY_LEARNED_STORAGE_KEY = 'learnedFieldAnswers';
+const LEARNED_CONTEXT_STORAGE_KEY = 'learnedFieldAnswersV2';
 const LAST_REPORT_STORAGE_KEY = 'lastAutofillReport';
+const RECENT_NAME_SETS_STORAGE_KEY = 'recentNameSets';
 const AUTO_POPUP_HOSTS_KEY = 'autoPopupHosts';
 const AUTO_POPUP_ID = 'qa-autofill-inline-popup';
 const DEFAULT_AUTO_POPUP_HOSTS = [
@@ -39,16 +61,18 @@ const DEFAULT_AUTO_POPUP_HOSTS = [
     'staging.enquirytracker.net'
 ];
 const DEFAULT_TOGGLE_DENYLIST = 'none,no,not applicable,prefer not,decline';
-const ADDRESS_LOOKUP_QUERY = '12';
+const ADDRESS_LOOKUP_QUERY = '123 Eagle Street';
 const KG_COUNTRY_ISO = 'kg';
 const KG_DIAL = '+996';
-const KG_LOCAL_PHONE = '707160409';
+const KG_LOCAL_PHONE = '777777777';
 
 let learningListenersAttached = false;
 let currentFormType: FormType = 'general';
 let currentSettings: AutofillSettings | null = null;
 let currentReport: AutofillReport | null = null;
 let currentAddressAutocompleteUsed = false;
+let currentNameSlots: NameSet[] = [];
+const sectionNameDraft: Record<string, Partial<NameSet>> = {};
 
 const SMART_OPTION_RULES: Record<string, string[]> = {
     relationship: ['parent', 'mother', 'father', 'guardian'],
@@ -60,6 +84,61 @@ const SMART_OPTION_RULES: Record<string, string[]> = {
     geographicstatus: ['local', 'domestic']
 };
 
+const FORM_RECIPES: FormRecipe[] = [
+    {
+        id: 'general',
+        formType: 'general',
+        urlPatterns: ['/webforms/general/'],
+        fieldOverrides: {
+            salutationId: 'Mr',
+            genderId: 'Male',
+            relationshipId: 'Mother',
+            mainLanguageId: 'English',
+            hearAboutUsId: 'Advertising'
+        }
+    },
+    {
+        id: 'prospectus',
+        formType: 'general',
+        urlPatterns: ['/webforms/prospectus-request/'],
+        fieldOverrides: {
+            salutationId: 'Mr',
+            genderId: 'Male',
+            relationshipId: 'Mother',
+            mainLanguageId: 'English'
+        }
+    },
+    {
+        id: 'event',
+        formType: 'event',
+        urlPatterns: ['/webforms/event-registration/'],
+        fieldOverrides: {
+            salutationId: 'Mr',
+            genderId: 'Male',
+            relationshipId: 'Mother',
+            mainLanguageId: 'English',
+            totalAttendees: '2'
+        }
+    },
+    {
+        id: 'application',
+        formType: 'application',
+        urlPatterns: ['/application/', '/request-application/'],
+        fieldOverrides: {
+            mainLanguageId: 'English',
+            studentResidenceId: 'Both Parents'
+        }
+    }
+];
+
+const FALLBACK_NAME_SETS: Array<{ firstName: string; lastName: string }> = [
+    { firstName: 'John', lastName: 'Doe' },
+    { firstName: 'Jane', lastName: 'Smith' },
+    { firstName: 'Alex', lastName: 'Brown' },
+    { firstName: 'Emily', lastName: 'Wilson' },
+    { firstName: 'Michael', lastName: 'Taylor' }
+];
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === "FILL_FORM") {
         fillForms(
@@ -70,7 +149,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 autoSubmit: Boolean(message.autoSubmit),
                 dryRun: Boolean(message.dryRun),
                 debugMode: Boolean(message.debugMode),
-                toggleDenylist: typeof message.toggleDenylist === 'string' ? message.toggleDenylist : DEFAULT_TOGGLE_DENYLIST
+                toggleDenylist: typeof message.toggleDenylist === 'string' ? message.toggleDenylist : DEFAULT_TOGGLE_DENYLIST,
+                fieldOverrides: (message.fieldOverrides && typeof message.fieldOverrides === 'object')
+                    ? message.fieldOverrides as Record<string, string>
+                    : {}
             }
         )
             .then((result) => sendResponse({ status: "success", ...result }))
@@ -136,6 +218,82 @@ function detectFormType(explicitFormType: string): FormType {
     return 'general';
 }
 
+function getCurrentUrlPattern(): string {
+    const path = window.location.pathname.toLowerCase();
+    if (path.includes('/request-application/')) return '/request-application/';
+    if (path.includes('/application/')) return '/application/';
+    if (path.includes('/webforms/general/')) return '/webforms/general/';
+    if (path.includes('/webforms/prospectus-request/')) return '/webforms/prospectus-request/';
+    if (path.includes('/webforms/event-registration/')) return '/webforms/event-registration/';
+    if (path.includes('/webforms/')) return '/webforms/';
+    return '/';
+}
+
+function getRecipeByUrl(pathname: string): FormRecipe | null {
+    const normalizedPath = pathname.toLowerCase();
+    return FORM_RECIPES.find((recipe) =>
+        recipe.urlPatterns.some((pattern) => normalizedPath.includes(pattern))
+    ) || null;
+}
+
+function getStepKeyForElement(element: Element): string {
+    const selectedHeader = document.querySelector<HTMLElement>(
+        '.mat-step-header[aria-selected="true"], .mat-mdc-step-header[aria-selected="true"], [role="tab"][aria-selected="true"]'
+    );
+    const headerText = selectedHeader ? textForElement(selectedHeader) : '';
+    if (headerText) {
+        return normalizeKey(headerText).slice(0, 60);
+    }
+
+    const localStep = element.closest('[id*="step"], .mat-step-content, .mat-horizontal-stepper-content');
+    if (localStep instanceof HTMLElement && localStep.id) {
+        return normalizeKey(localStep.id);
+    }
+
+    return 'default-step';
+}
+
+function getSectionKeyForElement(element: Element): string {
+    const section = element.closest('section, mat-card, .section, .form-group, .mat-card-content, .step, .row');
+    if (!section) return 'global';
+
+    const heading = section.querySelector('h1, h2, h3, h4, legend, mat-card-title, .section-title, .title');
+    const headingText = heading ? textForElement(heading) : '';
+    if (headingText) return normalizeKey(headingText).slice(0, 80);
+
+    const sectionText = textForElement(section).slice(0, 80);
+    return sectionText ? normalizeKey(sectionText).slice(0, 80) : 'global';
+}
+
+function getFieldCandidates(element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, fieldName: string): string[] {
+    const rawCandidates = [
+        element.getAttribute('formcontrolname') || '',
+        element.getAttribute('name') || '',
+        element.id || '',
+        element.getAttribute('aria-label') || '',
+        element.getAttribute('placeholder') || '',
+        fieldName
+    ];
+
+    if (element instanceof HTMLElement) {
+        const label = element.closest('label')?.textContent || '';
+        rawCandidates.push(label);
+        const wrapperLabel = element.closest('mat-form-field, .form-group, .field')?.querySelector('label, mat-label')?.textContent || '';
+        rawCandidates.push(wrapperLabel);
+    }
+
+    const normalized = rawCandidates
+        .map((candidate) => normalizeKey(candidate))
+        .filter(Boolean);
+
+    const keyFromFieldName = getFieldKey(fieldName);
+    if (keyFromFieldName) {
+        normalized.push(normalizeKey(keyFromFieldName));
+    }
+
+    return [...new Set(normalized)].slice(0, 12);
+}
+
 function getEmptyLearnedByForm(): LearnedByForm {
     return {
         application: {},
@@ -146,7 +304,7 @@ function getEmptyLearnedByForm(): LearnedByForm {
 }
 
 async function getLearnedByForm(): Promise<LearnedByForm> {
-    const result = await getStorage<Record<string, unknown>>([LEARNED_STORAGE_KEY_BY_FORM, LEGACY_LEARNED_STORAGE_KEY]);
+    const result = await getStorage<Record<string, unknown>>([LEARNED_STORAGE_KEY_BY_FORM]);
     const scoped = result[LEARNED_STORAGE_KEY_BY_FORM];
     if (scoped && typeof scoped === 'object') {
         const value = scoped as Partial<LearnedByForm>;
@@ -155,15 +313,169 @@ async function getLearnedByForm(): Promise<LearnedByForm> {
             ...value
         };
     }
+    return getEmptyLearnedByForm();
+}
 
-    const legacy = result[LEGACY_LEARNED_STORAGE_KEY];
-    const legacyMap = legacy && typeof legacy === 'object' ? legacy as LearnedAnswers : {};
-    const migrated = getEmptyLearnedByForm();
-    migrated.general = { ...legacyMap };
-    await setStorage({
-        [LEARNED_STORAGE_KEY_BY_FORM]: migrated
+async function getLearnedContextRecords(): Promise<LearnedContextRecord[]> {
+    const result = await getStorage<Record<string, unknown>>([LEARNED_CONTEXT_STORAGE_KEY]);
+    const value = result[LEARNED_CONTEXT_STORAGE_KEY];
+    if (!Array.isArray(value)) return [];
+    return value as LearnedContextRecord[];
+}
+
+function normalizeNamePart(value: string): string {
+    return value.trim().replace(/\s+/g, ' ');
+}
+
+function isValidNameSet(firstName: string, lastName: string): boolean {
+    return normalizeNamePart(firstName).length >= 2 && normalizeNamePart(lastName).length >= 2;
+}
+
+function uniqueNameSets(sets: NameSet[]): NameSet[] {
+    const seen = new Set<string>();
+    const output: NameSet[] = [];
+
+    sets.forEach((set) => {
+        const key = `${normalizeNamePart(set.firstName).toLowerCase()}|${normalizeNamePart(set.lastName).toLowerCase()}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        output.push({
+            firstName: normalizeNamePart(set.firstName),
+            lastName: normalizeNamePart(set.lastName),
+            updatedAt: set.updatedAt
+        });
     });
-    return migrated;
+
+    return output;
+}
+
+async function getRecentNameSets(): Promise<NameSet[]> {
+    const result = await getStorage<Record<string, unknown>>([RECENT_NAME_SETS_STORAGE_KEY]);
+    const value = result[RECENT_NAME_SETS_STORAGE_KEY];
+    if (!Array.isArray(value)) return [];
+    return (value as NameSet[])
+        .filter((item) => typeof item?.firstName === 'string' && typeof item?.lastName === 'string')
+        .map((item) => ({
+            firstName: normalizeNamePart(item.firstName),
+            lastName: normalizeNamePart(item.lastName),
+            updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : Date.now()
+        }));
+}
+
+async function saveRecentNameSets(sets: NameSet[]): Promise<void> {
+    const unique = uniqueNameSets(sets)
+        .filter((set) => isValidNameSet(set.firstName, set.lastName))
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, 5);
+    await setStorage({ [RECENT_NAME_SETS_STORAGE_KEY]: unique });
+}
+
+async function pushRecentNameSet(firstName: string, lastName: string): Promise<void> {
+    if (!isValidNameSet(firstName, lastName)) return;
+    const current = await getRecentNameSets();
+    const incoming: NameSet = {
+        firstName: normalizeNamePart(firstName),
+        lastName: normalizeNamePart(lastName),
+        updatedAt: Date.now()
+    };
+    await saveRecentNameSets([incoming, ...current]);
+}
+
+function buildNameSlots(sets: NameSet[]): NameSet[] {
+    const unique = uniqueNameSets(sets)
+        .filter((set) => isValidNameSet(set.firstName, set.lastName))
+        .slice(0, 5);
+
+    const merged = [...unique];
+    FALLBACK_NAME_SETS.forEach((fallback, index) => {
+        if (merged.length >= 5) return;
+        merged.push({
+            ...fallback,
+            updatedAt: Date.now() - (index + 1) * 1000
+        });
+    });
+    return merged.slice(0, 5);
+}
+
+function getEntityNameSlotIndex(fieldName: string): number {
+    const normalized = normalizeKey(fieldName);
+    if (
+        normalized.includes('contact2') ||
+        normalized.includes('secondarycontact') ||
+        normalized.includes('spouse') ||
+        normalized.includes('guardian2') ||
+        normalized.includes('secondparent')
+    ) {
+        return 1;
+    }
+
+    if (
+        normalized.includes('student') ||
+        normalized.includes('pupil') ||
+        normalized.includes('child')
+    ) {
+        return 2;
+    }
+
+    return 0;
+}
+
+async function saveLearnedContextRecord(record: LearnedContextRecord): Promise<void> {
+    const existing = await getLearnedContextRecords();
+    const key = `${record.formType}|${record.urlPattern}|${record.stepKey}|${record.sectionKey}|${record.fieldCandidates[0] || ''}`;
+    const deduped = existing.filter((item) => {
+        const itemKey = `${item.formType}|${item.urlPattern}|${item.stepKey}|${item.sectionKey}|${item.fieldCandidates[0] || ''}`;
+        return itemKey !== key;
+    });
+
+    deduped.unshift(record);
+    const trimmed = deduped.slice(0, 2000);
+    await setStorage({ [LEARNED_CONTEXT_STORAGE_KEY]: trimmed });
+}
+
+function scoreContextRecord(
+    record: LearnedContextRecord,
+    formType: FormType,
+    urlPattern: string,
+    stepKey: string,
+    sectionKey: string,
+    candidates: string[]
+): number {
+    let score = 0;
+    if (record.formType === formType) score += 6;
+    if (record.urlPattern === urlPattern) score += 5;
+    if (record.stepKey === stepKey) score += 4;
+    if (record.sectionKey === sectionKey) score += 3;
+
+    const overlap = record.fieldCandidates.filter((candidate) => candidates.includes(candidate)).length;
+    score += overlap * 5;
+
+    const freshnessBoost = Math.max(0, 2 - Math.floor((Date.now() - record.updatedAt) / (1000 * 60 * 60 * 24)));
+    score += freshnessBoost;
+    return score;
+}
+
+function findLearnedContextValue(
+    records: LearnedContextRecord[],
+    formType: FormType,
+    urlPattern: string,
+    stepKey: string,
+    sectionKey: string,
+    candidates: string[]
+): string | null {
+    if (records.length === 0 || candidates.length === 0) return null;
+
+    let bestScore = -1;
+    let bestValue: string | null = null;
+    records.forEach((record) => {
+        const score = scoreContextRecord(record, formType, urlPattern, stepKey, sectionKey, candidates);
+        if (score > bestScore && score >= 8) {
+            bestScore = score;
+            bestValue = record.value;
+        }
+    });
+
+    return bestValue;
 }
 
 async function saveLearnedAnswer(formType: FormType, fieldKey: string, value: string): Promise<void> {
@@ -193,7 +505,8 @@ async function getAutofillSettings(): Promise<AutofillSettings> {
         'selectedAutoSubmit',
         'selectedDryRun',
         'selectedDebugMode',
-        'selectedToggleDenylist'
+        'selectedToggleDenylist',
+        'selectedFieldOverrides'
     ]);
     return {
         profileType: (result.selectedProfile as string) || 'random',
@@ -202,7 +515,8 @@ async function getAutofillSettings(): Promise<AutofillSettings> {
         autoSubmit: Boolean(result.selectedAutoSubmit),
         dryRun: Boolean(result.selectedDryRun),
         debugMode: Boolean(result.selectedDebugMode),
-        toggleDenylist: (result.selectedToggleDenylist as string) || DEFAULT_TOGGLE_DENYLIST
+        toggleDenylist: (result.selectedToggleDenylist as string) || DEFAULT_TOGGLE_DENYLIST,
+        fieldOverrides: (result.selectedFieldOverrides as Record<string, string>) || {}
     };
 }
 
@@ -338,12 +652,39 @@ function attachLearningListeners(): void {
         const fieldName = getFieldName(target);
         const fieldKey = getFieldKey(fieldName) || normalizeKey(fieldName);
         if (!fieldKey) return;
+        const candidates = getFieldCandidates(target, fieldName);
 
         const value = getElementCurrentValue(target);
         if (!value) return;
 
         const keys = getLearningKeys(fieldKey);
         await Promise.all(keys.map((key) => saveLearnedAnswer(currentFormType, key, value)));
+
+        if (fieldKey === 'firstName' || fieldKey === 'lastName') {
+            const sectionKey = getSectionKeyForElement(target);
+            const draft = sectionNameDraft[sectionKey] || {};
+            if (fieldKey === 'firstName') {
+                draft.firstName = value;
+            } else {
+                draft.lastName = value;
+            }
+            sectionNameDraft[sectionKey] = draft;
+
+            if (draft.firstName && draft.lastName) {
+                await pushRecentNameSet(draft.firstName, draft.lastName);
+            }
+        }
+
+        const contextRecord: LearnedContextRecord = {
+            formType: currentFormType,
+            urlPattern: getCurrentUrlPattern(),
+            stepKey: getStepKeyForElement(target),
+            sectionKey: getSectionKeyForElement(target),
+            fieldCandidates: candidates,
+            value,
+            updatedAt: Date.now()
+        };
+        await saveLearnedContextRecord(contextRecord);
     };
 
     document.addEventListener('change', saveHandler, true);
@@ -638,18 +979,68 @@ function getMatOptionCandidates(): HTMLElement[] {
 }
 
 function resolveFieldValue(
+    element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
     fieldName: string,
     inputType: string,
     profileData: ProfileData,
-    learnedAnswers: LearnedAnswers
+    learnedAnswers: LearnedAnswers,
+    learnedContexts: LearnedContextRecord[],
+    recipe: FormRecipe | null
 ): { value: string; source: FillSource } {
     const key = getFieldKey(fieldName);
+    const candidates = getFieldCandidates(element, fieldName);
+    const stepKey = getStepKeyForElement(element);
+    const sectionKey = getSectionKeyForElement(element);
+    const urlPattern = getCurrentUrlPattern();
+
+    const contextValue = findLearnedContextValue(
+        learnedContexts,
+        currentFormType,
+        urlPattern,
+        stepKey,
+        sectionKey,
+        candidates
+    );
+    if (contextValue) {
+        return { value: contextValue, source: 'learned' };
+    }
+
+    if (key === 'firstName' || key === 'lastName' || key === 'fullName') {
+        const slotIndex = getEntityNameSlotIndex(fieldName);
+        const selected = currentNameSlots[slotIndex] || currentNameSlots[0];
+        if (selected) {
+            if (key === 'firstName') {
+                return { value: selected.firstName, source: 'mapped' };
+            }
+            if (key === 'lastName') {
+                return { value: selected.lastName, source: 'mapped' };
+            }
+            return { value: `${selected.firstName} ${selected.lastName}`, source: 'mapped' };
+        }
+    }
+
     if (key && learnedAnswers[key]) {
         return { value: learnedAnswers[key], source: 'learned' };
     }
+
+    if (recipe && key && recipe.fieldOverrides[key]) {
+        return { value: recipe.fieldOverrides[key], source: 'mapped' };
+    }
+
     if (key && profileData[key]) {
         return { value: profileData[key], source: 'mapped' };
     }
+
+    for (const candidate of candidates) {
+        const guessedKey = getFieldKey(candidate);
+        if (guessedKey && learnedAnswers[guessedKey]) {
+            return { value: learnedAnswers[guessedKey], source: 'learned' };
+        }
+        if (guessedKey && profileData[guessedKey]) {
+            return { value: profileData[guessedKey], source: 'mapped' };
+        }
+    }
+
     return { value: getFieldValue(fieldName, profileData, inputType), source: 'fallback' };
 }
 
@@ -886,21 +1277,13 @@ async function closeOpenOverlayPanels(): Promise<void> {
     await wait(60);
 }
 
-function hasMeaningfulMatSelectValue(trigger: HTMLElement): boolean {
-    const text = textForElement(trigger).toLowerCase();
-    if (!text) return false;
-
-    const emptyTokens = [
-        'please select',
-        'no item selected',
-        'select',
-        'choose'
-    ];
-
-    return !emptyTokens.some((token) => text.includes(token));
-}
-
-async function fillMaterialSelects(strategy: DropdownStrategy, profileData: ProfileData, learnedAnswers: LearnedAnswers): Promise<number> {
+async function fillMaterialSelects(
+    strategy: DropdownStrategy,
+    profileData: ProfileData,
+    learnedAnswers: LearnedAnswers,
+    learnedContexts: LearnedContextRecord[],
+    recipe: FormRecipe | null
+): Promise<number> {
     let filled = 0;
     const matSelects = getMatSelectTriggers();
 
@@ -909,14 +1292,21 @@ async function fillMaterialSelects(strategy: DropdownStrategy, profileData: Prof
             matSelect.classList.contains('mat-mdc-select-disabled') ||
             matSelect.classList.contains('mat-select-disabled');
         if (isDisabled || !isElementVisible(matSelect)) continue;
-        if (hasMeaningfulMatSelectValue(matSelect)) continue;
 
         const fieldName = getFieldName(matSelect as unknown as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement);
         if (currentAddressAutocompleteUsed && isAddressDependentField(fieldName)) {
             appendReportDetail(`skip ${fieldName}: address autocomplete owns dependent fields`);
             continue;
         }
-        const preferred = resolveFieldValue(fieldName, 'select', profileData, learnedAnswers).value;
+        const preferred = resolveFieldValue(
+            matSelect as unknown as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
+            fieldName,
+            'select',
+            profileData,
+            learnedAnswers,
+            learnedContexts,
+            recipe
+        ).value;
 
         if (currentSettings?.dryRun) {
             filled++;
@@ -1119,7 +1509,13 @@ function getInputTargets(): Array<HTMLInputElement | HTMLTextAreaElement> {
     ));
 }
 
-async function fillInputs(profileData: ProfileData, learnedAnswers: LearnedAnswers, forceInvalidOnly = false): Promise<number> {
+async function fillInputs(
+    profileData: ProfileData,
+    learnedAnswers: LearnedAnswers,
+    learnedContexts: LearnedContextRecord[],
+    recipe: FormRecipe | null,
+    forceInvalidOnly = false
+): Promise<number> {
     const inputs = getInputTargets();
     const handledRadioGroups = new Set<string>();
     let filled = 0;
@@ -1131,7 +1527,7 @@ async function fillInputs(profileData: ProfileData, learnedAnswers: LearnedAnswe
             continue;
         }
 
-        if (input.type === 'checkbox') {
+        if (input instanceof HTMLInputElement && input.type === 'checkbox') {
             if (!input.checked) {
                 if (!currentSettings?.dryRun) {
                     input.checked = true;
@@ -1143,7 +1539,7 @@ async function fillInputs(profileData: ProfileData, learnedAnswers: LearnedAnswe
             continue;
         }
 
-        if (input.type === 'radio') {
+        if (input instanceof HTMLInputElement && input.type === 'radio') {
             const group = input.name || input.id || `radio-${Math.random()}`;
             if (handledRadioGroups.has(group)) continue;
             if (!currentSettings?.dryRun) {
@@ -1163,7 +1559,15 @@ async function fillInputs(profileData: ProfileData, learnedAnswers: LearnedAnswe
             appendReportDetail(`skip ${fieldName}: address autocomplete owns dependent fields`);
             continue;
         }
-        const resolved = resolveFieldValue(fieldName, input.type, profileData, learnedAnswers);
+        const resolved = resolveFieldValue(
+            input,
+            fieldName,
+            input.type,
+            profileData,
+            learnedAnswers,
+            learnedContexts,
+            recipe
+        );
         if (!resolved.value) continue;
 
         if (!currentSettings?.dryRun) {
@@ -1190,7 +1594,13 @@ async function fillInputs(profileData: ProfileData, learnedAnswers: LearnedAnswe
     return filled;
 }
 
-function fillNativeSelects(profileData: ProfileData, learnedAnswers: LearnedAnswers, strategy: DropdownStrategy): number {
+function fillNativeSelects(
+    profileData: ProfileData,
+    learnedAnswers: LearnedAnswers,
+    learnedContexts: LearnedContextRecord[],
+    recipe: FormRecipe | null,
+    strategy: DropdownStrategy
+): number {
     const selects = document.querySelectorAll<HTMLSelectElement>('select');
     let filled = 0;
     selects.forEach((select) => {
@@ -1200,7 +1610,15 @@ function fillNativeSelects(profileData: ProfileData, learnedAnswers: LearnedAnsw
             appendReportDetail(`skip ${fieldName}: address autocomplete owns dependent fields`);
             return;
         }
-        const preferred = resolveFieldValue(fieldName, 'select', profileData, learnedAnswers).value;
+        const preferred = resolveFieldValue(
+            select,
+            fieldName,
+            'select',
+            profileData,
+            learnedAnswers,
+            learnedContexts,
+            recipe
+        ).value;
         const option = chooseNativeOption(select, strategy, fieldName, preferred);
         if (!option) return;
 
@@ -1214,14 +1632,20 @@ function fillNativeSelects(profileData: ProfileData, learnedAnswers: LearnedAnsw
     return filled;
 }
 
-async function fillCurrentPage(profileData: ProfileData, learnedAnswers: LearnedAnswers, strategy: DropdownStrategy): Promise<number> {
+async function fillCurrentPage(
+    profileData: ProfileData,
+    learnedAnswers: LearnedAnswers,
+    learnedContexts: LearnedContextRecord[],
+    recipe: FormRecipe | null,
+    strategy: DropdownStrategy
+): Promise<number> {
     let filled = 0;
     const denylist = parseDenylist(currentSettings?.toggleDenylist || DEFAULT_TOGGLE_DENYLIST);
 
     // Pass 1: fill what's visible immediately.
-    filled += await fillInputs(profileData, learnedAnswers, false);
-    filled += fillNativeSelects(profileData, learnedAnswers, strategy);
-    filled += await fillMaterialSelects(strategy, profileData, learnedAnswers);
+    filled += await fillInputs(profileData, learnedAnswers, learnedContexts, recipe, false);
+    filled += fillNativeSelects(profileData, learnedAnswers, learnedContexts, recipe, strategy);
+    filled += await fillMaterialSelects(strategy, profileData, learnedAnswers, learnedContexts, recipe);
     filled += fillMaterialRadioGroups(strategy);
     filled += fillStandaloneAriaRadios(strategy);
     filled += turnOnAriaToggles(denylist);
@@ -1230,18 +1654,24 @@ async function fillCurrentPage(profileData: ProfileData, learnedAnswers: Learned
     filled += uploadDefaultDocuments();
 
     // Pass 2: some controls become visible only after radio/checkbox/select interactions.
-    filled += await fillInputs(profileData, learnedAnswers, false);
-    filled += fillNativeSelects(profileData, learnedAnswers, strategy);
-    filled += await fillMaterialSelects(strategy, profileData, learnedAnswers);
+    filled += await fillInputs(profileData, learnedAnswers, learnedContexts, recipe, false);
+    filled += fillNativeSelects(profileData, learnedAnswers, learnedContexts, recipe, strategy);
+    filled += await fillMaterialSelects(strategy, profileData, learnedAnswers, learnedContexts, recipe);
 
     return filled;
 }
 
-async function retryInvalidFields(profileData: ProfileData, learnedAnswers: LearnedAnswers, strategy: DropdownStrategy): Promise<number> {
+async function retryInvalidFields(
+    profileData: ProfileData,
+    learnedAnswers: LearnedAnswers,
+    learnedContexts: LearnedContextRecord[],
+    recipe: FormRecipe | null,
+    strategy: DropdownStrategy
+): Promise<number> {
     let retried = 0;
-    retried += await fillInputs(profileData, learnedAnswers, true);
-    retried += fillNativeSelects(profileData, learnedAnswers, strategy);
-    retried += await fillMaterialSelects(strategy, profileData, learnedAnswers);
+    retried += await fillInputs(profileData, learnedAnswers, learnedContexts, recipe, true);
+    retried += fillNativeSelects(profileData, learnedAnswers, learnedContexts, recipe, strategy);
+    retried += await fillMaterialSelects(strategy, profileData, learnedAnswers, learnedContexts, recipe);
     return retried;
 }
 
@@ -1260,12 +1690,18 @@ function clickSubmitButton(): boolean {
     return true;
 }
 
-async function fillAllStepperPages(profileData: ProfileData, learnedAnswers: LearnedAnswers, strategy: DropdownStrategy): Promise<{ filled: number; steps: number }> {
+async function fillAllStepperPages(
+    profileData: ProfileData,
+    learnedAnswers: LearnedAnswers,
+    learnedContexts: LearnedContextRecord[],
+    recipe: FormRecipe | null,
+    strategy: DropdownStrategy
+): Promise<{ filled: number; steps: number }> {
     let totalFilled = 0;
     let traversed = 1;
     const maxSteps = 20;
     for (let i = 0; i < maxSteps; i++) {
-        totalFilled += await fillCurrentPage(profileData, learnedAnswers, strategy);
+        totalFilled += await fillCurrentPage(profileData, learnedAnswers, learnedContexts, recipe, strategy);
         const moved = clickNextStepperButton();
         if (!moved) break;
         traversed++;
@@ -1288,14 +1724,32 @@ async function fillForms(
     };
     currentAddressAutocompleteUsed = false;
     const strategy = normalizeDropdownStrategy(currentSettings.dropdownStrategy);
-    currentFormType = detectFormType(formType || currentSettings.formType);
+    const matchedRecipe = getRecipeByUrl(window.location.pathname);
+    const recipeFormType = matchedRecipe?.formType || '';
+    currentFormType = detectFormType(recipeFormType || formType || currentSettings.formType);
     attachLearningListeners();
 
     const learnedByForm = await getLearnedByForm();
     const learnedAnswers = learnedByForm[currentFormType] || {};
+    const learnedContexts = await getLearnedContextRecords();
+    const baseProfileData = buildProfileData(profileType || currentSettings.profileType, currentFormType);
+    const recentNameSets = await getRecentNameSets();
+    const mergedNameSets = buildNameSlots([
+        {
+            firstName: baseProfileData.firstName || 'John',
+            lastName: baseProfileData.lastName || 'Doe',
+            updatedAt: Date.now()
+        },
+        ...recentNameSets
+    ]);
+    currentNameSlots = mergedNameSets;
+    await saveRecentNameSets(mergedNameSets);
+
     const profileData: ProfileData = {
-        ...buildProfileData(profileType || currentSettings.profileType, currentFormType),
-        ...learnedAnswers
+        ...baseProfileData,
+        ...(matchedRecipe?.fieldOverrides || {}),
+        ...learnedAnswers,
+        ...(currentSettings.fieldOverrides || {})
     };
 
     currentReport = {
@@ -1309,11 +1763,18 @@ async function fillForms(
         details: []
     };
 
-    const { filled, steps } = await fillAllStepperPages(profileData, learnedAnswers, strategy);
+    const { filled, steps } = await fillAllStepperPages(
+        profileData,
+        learnedAnswers,
+        learnedContexts,
+        matchedRecipe,
+        strategy
+    );
     currentReport.filled = filled;
     currentReport.stepsTraversed = steps;
 
-    currentReport.retried = 0;
+    const retried = await retryInvalidFields(profileData, learnedAnswers, learnedContexts, matchedRecipe, strategy);
+    currentReport.retried = retried;
     currentReport.invalidAfterRetry = collectInvalidCount();
 
     if (currentSettings.autoSubmit) {

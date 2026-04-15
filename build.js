@@ -4,6 +4,8 @@ const path = require('path');
 
 const outdir = 'dist';
 if (!fs.existsSync(outdir)) fs.mkdirSync(outdir);
+const iconsOutDir = path.join(outdir, 'icons');
+if (!fs.existsSync(iconsOutDir)) fs.mkdirSync(iconsOutDir, { recursive: true });
 
 // Copy static assets
 ['manifest.json', 'src/popup.html', 'src/styles.css'].forEach(file => {
@@ -18,6 +20,15 @@ if (!fs.existsSync(outdir)) fs.mkdirSync(outdir);
         const dest = path.join(outdir, path.basename(file));
         fs.copyFileSync(srcFile, dest);
         console.log(`Copied ${srcFile} to ${dest}`);
+    }
+});
+
+// Copy extension icons
+['src/icons/icon-16.png', 'src/icons/icon-32.png', 'src/icons/icon-48.png', 'src/icons/icon-128.png'].forEach((iconPath) => {
+    if (fs.existsSync(iconPath)) {
+        const dest = path.join(iconsOutDir, path.basename(iconPath));
+        fs.copyFileSync(iconPath, dest);
+        console.log(`Copied ${iconPath} to ${dest}`);
     }
 });
 

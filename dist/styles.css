@@ -99,6 +99,16 @@ textarea:focus {
   background-color: #111;
 }
 
+.advanced-collapsed {
+  display: none;
+}
+
+.advanced-expanded {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .horizontal-checks {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;

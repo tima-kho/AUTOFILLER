@@ -28,11 +28,11 @@ const defaultFormTemplates: Record<FormTemplateGroup, ProfileData> = {
         fullName: 'John Doe',
         genderId: '1',
         relationshipId: '1',
-        email: 'qa.application@test.com',
-        phone: '+996707160409',
-        mobile: '+996707160409',
-        homePhone: '+996707160409',
-        workPhone: '+996707160409',
+        email: 'qa.default@test.com',
+        phone: '+996777777777',
+        mobile: '+996777777777',
+        homePhone: '+996777777777',
+        workPhone: '+996777777777',
         communicationPreference: '1',
         dateOfBirth: '1998-09-15',
         company: 'QA Academy',
@@ -91,11 +91,11 @@ const defaultFormTemplates: Record<FormTemplateGroup, ProfileData> = {
         salutationId: '1',
         genderId: '1',
         relationshipId: '1',
-        email: 'qa.signup@test.com',
-        phone: '+996707160409',
-        mobile: '+996707160409',
-        homePhone: '+996707160409',
-        workPhone: '+996707160409',
+        email: 'qa.default@test.com',
+        phone: '+996777777777',
+        mobile: '+996777777777',
+        homePhone: '+996777777777',
+        workPhone: '+996777777777',
         communicationPreference: '1',
         company: 'QA Inc',
         jobTitle: 'QA Engineer',
@@ -219,10 +219,10 @@ function buildRandomTemplate(group: FormTemplateGroup): ProfileData {
         genderId: '1',
         relationshipId: '1',
         email: faker.internet.email({ firstName, lastName }).toLowerCase(),
-        phone: '+996707160409',
-        mobile: '+996707160409',
-        homePhone: '+996707160409',
-        workPhone: '+996707160409',
+        phone: '+996777777777',
+        mobile: '+996777777777',
+        homePhone: '+996777777777',
+        workPhone: '+996777777777',
         communicationPreference: '1',
         dateOfBirth: faker.date.birthdate({ min: 18, max: 60, mode: 'age' }).toISOString().split('T')[0],
         company: faker.company.name(),
@@ -336,7 +336,7 @@ export function getFieldValue(fieldName: string, profileData: ProfileData, input
 
     const normalizedType = inputType.toLowerCase();
     if (normalizedType === 'email') return profileData.email || 'qa@test.com';
-    if (normalizedType === 'tel') return profileData.phone || '+996707160409';
+    if (normalizedType === 'tel') return profileData.phone || '+996777777777';
     if (normalizedType === 'url') return profileData.website || 'https://example.com';
     if (normalizedType === 'date') return profileData.ptDate || profileData.eventDate || '2026-01-01';
     if (normalizedType === 'number') return profileData.attendeeCount || '1';

@@ -10,7 +10,8 @@ chrome.commands.onCommand.addListener((command) => {
             'selectedAutoSubmit',
             'selectedDryRun',
             'selectedDebugMode',
-            'selectedToggleDenylist'
+            'selectedToggleDenylist',
+            'selectedFieldOverrides'
         ], (result) => {
             const profile = result.selectedProfile || 'random';
             const formType = result.selectedFormType || 'general';
@@ -19,6 +20,9 @@ chrome.commands.onCommand.addListener((command) => {
             const dryRun = Boolean(result.selectedDryRun);
             const debugMode = Boolean(result.selectedDebugMode);
             const toggleDenylist = result.selectedToggleDenylist || 'none,no,not applicable,prefer not,decline';
+            const fieldOverrides = (result.selectedFieldOverrides && typeof result.selectedFieldOverrides === 'object')
+                ? result.selectedFieldOverrides
+                : {};
 
             chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
                 const activeTab = tabs[0];
@@ -31,7 +35,8 @@ chrome.commands.onCommand.addListener((command) => {
                         autoSubmit,
                         dryRun,
                         debugMode,
-                        toggleDenylist
+                        toggleDenylist,
+                        fieldOverrides
                     });
                 }
             });

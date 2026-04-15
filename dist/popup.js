@@ -4,10 +4,13 @@
   document.addEventListener("DOMContentLoaded", () => {
     const profileSelect = document.getElementById("profileSelect");
     const dropdownStrategySelect = document.getElementById("dropdownStrategySelect");
+    const moreBtn = document.getElementById("moreBtn");
+    const advancedSection = document.getElementById("advancedSection");
     const autoSubmitToggle = document.getElementById("autoSubmitToggle");
     const dryRunToggle = document.getElementById("dryRunToggle");
     const debugModeToggle = document.getElementById("debugModeToggle");
     const toggleDenylistInput = document.getElementById("toggleDenylistInput");
+    const fieldOverridesInput = document.getElementById("fieldOverridesInput");
     const fillBtn = document.getElementById("fillBtn");
     const refreshLearnedBtn = document.getElementById("refreshLearnedBtn");
     const resetLearnedBtn = document.getElementById("resetLearnedBtn");
@@ -17,6 +20,51 @@
     const configDataInput = document.getElementById("configDataInput");
     const reportOutput = document.getElementById("reportOutput");
     const DEFAULT_DENYLIST = "none,no,not applicable,prefer not,decline";
+    const normalizeOverrideKey = (key) => {
+      const normalized = key.trim().toLowerCase();
+      if (normalized === "name" || normalized === "firstname" || normalized === "first_name")
+        return "firstName";
+      if (normalized === "lastname" || normalized === "last_name" || normalized === "surname")
+        return "lastName";
+      if (normalized === "fullname" || normalized === "full_name")
+        return "fullName";
+      if (normalized === "mail")
+        return "email";
+      if (normalized === "tel" || normalized === "mobilephone")
+        return "mobile";
+      return key.trim();
+    };
+    const parseFieldOverrides = (raw) => {
+      const output = {};
+      raw.split("\n").forEach((line) => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#"))
+          return;
+        let splitIndex = trimmed.indexOf("=");
+        if (splitIndex <= 0)
+          splitIndex = trimmed.indexOf(":");
+        if (splitIndex <= 0)
+          splitIndex = trimmed.indexOf(" - ");
+        if (splitIndex <= 0)
+          splitIndex = trimmed.indexOf("-");
+        if (splitIndex <= 0)
+          return;
+        const keyRaw = trimmed.slice(0, splitIndex).trim();
+        const value = trimmed.slice(splitIndex + 1).trim();
+        const key = normalizeOverrideKey(keyRaw);
+        if (!key || !value)
+          return;
+        output[key] = value;
+      });
+      return output;
+    };
+    const saveFieldOverrides = () => {
+      const text = fieldOverridesInput.value || "";
+      chrome.storage.local.set({
+        selectedFieldOverridesText: text,
+        selectedFieldOverrides: parseFieldOverrides(text)
+      });
+    };
     const refreshLearnedAndReport = () => {
       chrome.storage.local.get(["learnedFieldAnswersByForm", "lastAutofillReport"], (result) => {
         learnedOutput.value = JSON.stringify(result.learnedFieldAnswersByForm || {}, null, 2);
@@ -29,7 +77,10 @@
       "selectedAutoSubmit",
       "selectedDryRun",
       "selectedDebugMode",
-      "selectedToggleDenylist"
+      "selectedToggleDenylist",
+      "selectedFieldOverridesText",
+      "selectedFieldOverrides",
+      "selectedAdvancedOpen"
     ], (result) => {
       if (result.selectedProfile) {
         profileSelect.value = result.selectedProfile;
@@ -41,8 +92,19 @@
       dryRunToggle.checked = Boolean(result.selectedDryRun);
       debugModeToggle.checked = Boolean(result.selectedDebugMode);
       toggleDenylistInput.value = result.selectedToggleDenylist || DEFAULT_DENYLIST;
+      fieldOverridesInput.value = result.selectedFieldOverridesText || Object.entries(result.selectedFieldOverrides || {}).map(([k, v]) => `${k}=${v}`).join("\n");
+      const advancedOpen = Boolean(result.selectedAdvancedOpen);
+      advancedSection.className = advancedOpen ? "advanced-expanded" : "advanced-collapsed";
+      moreBtn.textContent = advancedOpen ? "Less" : "More";
     });
     refreshLearnedAndReport();
+    moreBtn.addEventListener("click", () => {
+      const isOpen = advancedSection.classList.contains("advanced-expanded");
+      const nextOpen = !isOpen;
+      advancedSection.className = nextOpen ? "advanced-expanded" : "advanced-collapsed";
+      moreBtn.textContent = nextOpen ? "Less" : "More";
+      chrome.storage.local.set({ selectedAdvancedOpen: nextOpen });
+    });
     profileSelect.addEventListener("change", (e) => {
       const target = e.target;
       chrome.storage.local.set({ selectedProfile: target.value });
@@ -63,7 +125,10 @@
     toggleDenylistInput.addEventListener("blur", () => {
       chrome.storage.local.set({ selectedToggleDenylist: toggleDenylistInput.value || DEFAULT_DENYLIST });
     });
+    fieldOverridesInput.addEventListener("blur", saveFieldOverrides);
     fillBtn.addEventListener("click", () => {
+      const fieldOverrides = parseFieldOverrides(fieldOverridesInput.value || "");
+      saveFieldOverrides();
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         const activeTab = tabs[0];
         if (activeTab && activeTab.id) {
@@ -74,7 +139,8 @@
             autoSubmit: autoSubmitToggle.checked,
             dryRun: dryRunToggle.checked,
             debugMode: debugModeToggle.checked,
-            toggleDenylist: toggleDenylistInput.value || DEFAULT_DENYLIST
+            toggleDenylist: toggleDenylistInput.value || DEFAULT_DENYLIST,
+            fieldOverrides
           }, () => {
             refreshLearnedAndReport();
           });
@@ -89,12 +155,13 @@
       chrome.storage.local.get(null, (all) => {
         const payload = {
           selectedProfile: all.selectedProfile,
-          selectedFormType: all.selectedFormType,
           selectedDropdownStrategy: all.selectedDropdownStrategy,
           selectedAutoSubmit: all.selectedAutoSubmit,
           selectedDryRun: all.selectedDryRun,
           selectedDebugMode: all.selectedDebugMode,
           selectedToggleDenylist: all.selectedToggleDenylist,
+          selectedFieldOverridesText: all.selectedFieldOverridesText,
+          selectedFieldOverrides: all.selectedFieldOverrides,
           autoPopupHosts: all.autoPopupHosts,
           learnedFieldAnswersByForm: all.learnedFieldAnswersByForm
         };
