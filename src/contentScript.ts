@@ -779,53 +779,85 @@ function setElementValue(element: HTMLInputElement | HTMLTextAreaElement, value:
 function isGooglePlacesLikeInput(input: HTMLInputElement): boolean {
     const placeholder = (input.placeholder || '').toLowerCase();
     const className = (input.className || '').toLowerCase();
-    return placeholder.includes('enter a location') || className.includes('pac-target-input');
+    const name = (input.name || input.id || input.getAttribute('formcontrolname') || '').toLowerCase();
+    return (
+        placeholder.includes('enter a location') ||
+        placeholder.includes('search address') ||
+        placeholder.includes('start typing') ||
+        placeholder.includes('type to search') ||
+        className.includes('pac-target-input') ||
+        name.includes('addresslookup') ||
+        name.includes('address_lookup') ||
+        name.includes('placesearch')
+    );
 }
 
 async function fillPlacesAutocompleteField(input: HTMLInputElement, value: string): Promise<boolean> {
-    setElementValue(input, '');
-    dispatchEvents(input);
-    await wait(40);
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    const setNative = (el: HTMLInputElement, val: string): void => {
+        if (nativeSetter) nativeSetter.call(el, val);
+        else el.value = val;
+    };
 
-    setElementValue(input, value);
+    // Clear field via native setter so reactive frameworks see the change
+    setNative(input, '');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await wait(80);
+
     input.focus();
-    dispatchEvents(input);
+    await wait(60);
 
-    // Trigger autocomplete engines that require key events.
+    // Type character by character — Google Places only reacts to incremental input events
     for (const char of value.split('')) {
-        input.dispatchEvent(new KeyboardEvent('keydown', { key: char, code: `Digit${char}`, bubbles: true }));
-        input.dispatchEvent(new KeyboardEvent('keyup', { key: char, code: `Digit${char}`, bubbles: true }));
+        const next = input.value + char;
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true, cancelable: true }));
+        setNative(input, next);
+        input.dispatchEvent(new InputEvent('input', { bubbles: true, data: char, inputType: 'insertText' }));
+        input.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
+        await wait(45);
     }
 
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', bubbles: true }));
-    input.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowDown', code: 'ArrowDown', bubbles: true }));
 
-    // Wait up to ~4.5s for suggestions to appear.
-    for (let i = 0; i < 30; i++) {
+    const SUGGESTION_SELECTORS = [
+        '.pac-item',
+        '.pac-container .pac-item',
+        '.cdk-overlay-container mat-option:not([aria-disabled="true"])',
+        '.cdk-overlay-container [role="option"]:not([aria-disabled="true"])',
+        '[data-place-id]',
+    ];
+
+    // Poll up to ~6s for any autocomplete suggestion
+    for (let i = 0; i < 40; i++) {
         await wait(150);
-        const options = Array.from(
-            document.querySelectorAll<HTMLElement>('.pac-item, .pac-container .pac-item')
-        ).filter(isElementVisible);
 
-        if (options.length > 0) {
-            options[0].click();
-            await wait(140);
-            dispatchEvents(input);
-            return true;
+        for (const selector of SUGGESTION_SELECTORS) {
+            const visible = Array.from(document.querySelectorAll<HTMLElement>(selector))
+                .filter(isElementVisible);
+            if (visible.length > 0) {
+                visible[0].click();
+                // Give the form time to populate city/country/postal code
+                await wait(600);
+                dispatchEvents(input);
+                return true;
+            }
         }
 
-        // Re-trigger every few attempts for slower widgets.
-        if (i === 8 || i === 16 || i === 24) {
+        // Re-trigger autocomplete every ~2s to handle slow widgets
+        if (i === 13 || i === 26) {
             input.focus();
-            setElementValue(input, value);
-            dispatchEvents(input);
+            const current = input.value;
+            setNative(input, current);
+            input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
             input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', bubbles: true }));
         }
     }
 
-    // Try Enter only after a full wait cycle.
+    // Last resort: keyboard Enter to accept highlighted suggestion
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
     input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }));
+    await wait(400);
     dispatchEvents(input);
     return false;
 }
@@ -903,27 +935,115 @@ function isDateLikeField(fieldName: string, input: HTMLInputElement | HTMLTextAr
     return joined.includes('date') || joined.includes('birth') || joined.includes('dob') || joined.includes('ptdate');
 }
 
-async function fillDateWithCalendar(input: HTMLInputElement | HTMLTextAreaElement, fallbackValue: string): Promise<void> {
-    const root = input.closest('mat-form-field, .mat-mdc-form-field, .mat-form-field, .form-group, .field') || input.parentElement;
-    const toggle = root?.querySelector<HTMLElement>('mat-datepicker-toggle button, button[aria-label*="calendar" i], button[aria-label*="date" i], .mat-datepicker-toggle button');
+async function navigateCalendarToDate(targetYear: number, targetMonth: number): Promise<void> {
+    const MONTH_ABBRS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
-    if (toggle) {
-        toggle.click();
-        await wait(180);
+    const getOverlayCells = () =>
+        Array.from(document.querySelectorAll<HTMLElement>('.cdk-overlay-container .mat-calendar-body-cell'));
 
-        const dayCell = document.querySelector<HTMLElement>(
-            '.cdk-overlay-container .mat-calendar-body-cell:not(.mat-calendar-body-disabled) .mat-calendar-body-cell-content'
+    const clickPrev = async () => {
+        const btn = document.querySelector<HTMLElement>(
+            '.cdk-overlay-container .mat-calendar-previous-button, .cdk-overlay-container button[aria-label*="Previous" i]'
         );
+        btn?.click();
+        await wait(160);
+    };
+
+    const clickNext = async () => {
+        const btn = document.querySelector<HTMLElement>(
+            '.cdk-overlay-container .mat-calendar-next-button, .cdk-overlay-container button[aria-label*="Next" i]'
+        );
+        btn?.click();
+        await wait(160);
+    };
+
+    // Switch to multi-year view via the period button
+    const periodBtn = document.querySelector<HTMLElement>(
+        '.cdk-overlay-container .mat-calendar-period-button'
+    );
+    if (!periodBtn) return;
+    periodBtn.click();
+    await wait(250);
+
+    // Navigate year ranges until target year is visible (max 15 range-clicks = 240 years)
+    for (let r = 0; r < 15; r++) {
+        const cells = getOverlayCells();
+        const years = cells.map(el => parseInt(el.textContent?.trim() || '0', 10)).filter(y => y > 1900);
+        if (years.length === 0) break;
+        const min = Math.min(...years);
+        const max = Math.max(...years);
+        if (targetYear >= min && targetYear <= max) {
+            const yearCell = cells.find(el => el.textContent?.trim() === String(targetYear));
+            yearCell?.click();
+            await wait(220);
+            break;
+        }
+        if (targetYear < min) await clickPrev(); else await clickNext();
+    }
+
+    // Now in month view — click target month
+    await wait(150);
+    const monthCells = getOverlayCells();
+    const targetAbbr = MONTH_ABBRS[targetMonth];
+    const monthCell = monthCells.find(el =>
+        (el.textContent?.trim() || '').toLowerCase().startsWith(targetAbbr)
+    );
+    monthCell?.click();
+    await wait(220);
+}
+
+async function fillDateWithCalendar(input: HTMLInputElement | HTMLTextAreaElement, fallbackValue: string): Promise<void> {
+    // Native date inputs accept the value directly — no calendar UI needed
+    if (input instanceof HTMLInputElement && input.type === 'date') {
+        if (!currentSettings?.dryRun) {
+            setElementValue(input, fallbackValue);
+            dispatchEvents(input);
+        }
+        return;
+    }
+
+    const [yearStr, monthStr, dayStr] = fallbackValue.split('-');
+    const targetYear = parseInt(yearStr, 10);
+    const targetMonth = parseInt(monthStr, 10) - 1; // 0-indexed
+    const targetDay = parseInt(dayStr, 10);
+
+    const root = input.closest('mat-form-field, .mat-mdc-form-field, .mat-form-field, .form-group, .field') || input.parentElement;
+    const toggle = root?.querySelector<HTMLElement>(
+        'mat-datepicker-toggle button, button[aria-label*="calendar" i], button[aria-label*="date" i], .mat-datepicker-toggle button'
+    );
+
+    if (toggle && !currentSettings?.dryRun) {
+        toggle.click();
+        await wait(350);
+
+        // Navigate to the correct year and month
+        await navigateCalendarToDate(targetYear, targetMonth);
+
+        // Click the correct day
+        const dayCells = Array.from(document.querySelectorAll<HTMLElement>(
+            '.cdk-overlay-container .mat-calendar-body-cell:not(.mat-calendar-body-disabled)'
+        ));
+        const dayCell = dayCells.find((el) => {
+            const label = el.querySelector('.mat-calendar-body-cell-content')?.textContent?.trim();
+            return label === String(targetDay);
+        }) ?? dayCells[0];
+
         if (dayCell) {
             dayCell.click();
-            await wait(120);
+            await wait(220);
             dispatchEvents(input as HTMLElement);
             return;
         }
+
+        // Close calendar if we couldn't click the day
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+        await wait(120);
     }
 
+    // Fallback: type the date directly in DD/MM/YYYY format (common in AU/NZ/UK forms)
     if (!currentSettings?.dryRun) {
-        setElementValue(input as HTMLInputElement | HTMLTextAreaElement, fallbackValue);
+        const formatted = `${dayStr}/${monthStr}/${yearStr}`;
+        setElementValue(input as HTMLInputElement | HTMLTextAreaElement, formatted);
         dispatchEvents(input as HTMLElement);
     }
 }
@@ -1521,7 +1641,14 @@ async function fillInputs(
     let filled = 0;
 
     for (const input of inputs) {
-        if (input.disabled || input.readOnly) continue;
+        if (input.disabled) continue;
+        if (input.readOnly) {
+            // Address-dependent fields (city, country, postal code) can be set readonly
+            // by Google Places until a suggestion is picked. When autocomplete failed,
+            // we still need to fill them from profileData — so allow falling through.
+            const fn = getFieldName(input);
+            if (currentAddressAutocompleteUsed || !isAddressDependentField(fn)) continue;
+        }
         if (shouldSkipInputElement(input)) continue;
         if (forceInvalidOnly && input.getAttribute('aria-invalid') !== 'true' && !input.classList.contains('ng-invalid')) {
             continue;
@@ -1571,6 +1698,9 @@ async function fillInputs(
         if (!resolved.value) continue;
 
         if (!currentSettings?.dryRun) {
+            // Remove readonly before filling if it was allowed through above
+            if (input.readOnly) (input as HTMLInputElement).readOnly = false;
+
             if (input instanceof HTMLInputElement && isPhoneField(fieldName, input)) {
                 await fillPhoneField(input);
                 appendReportDetail(`phone forced to ${KG_DIAL}${KG_LOCAL_PHONE}`);
@@ -1579,6 +1709,8 @@ async function fillInputs(
                 if (selected) {
                     currentAddressAutocompleteUsed = true;
                     appendReportDetail(`address lookup used query "${ADDRESS_LOOKUP_QUERY}" and selected first suggestion`);
+                } else {
+                    appendReportDetail(`address autocomplete failed — will fill dependent fields from profile`);
                 }
             } else if (isDateLikeField(fieldName, input)) {
                 await fillDateWithCalendar(input, resolved.value);
