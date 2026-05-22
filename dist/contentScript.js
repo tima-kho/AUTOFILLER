@@ -5784,6 +5784,20 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
       siblingsId: "0",
       hasFutureSiblings: "1",
       hearAboutUsId: "1",
+      campusId: "1",
+      religionId: "1",
+      indigenousStatusId: "1",
+      boardingTypeId: "1",
+      startingYear: "1",
+      startingPeriodId: "1",
+      schoolIntakeYearId: "1",
+      classGroups: "1",
+      submittedApplication: "1",
+      currentSchoolId: "",
+      currentSchoolYearId: "1",
+      hasSpecialNeeds: "false",
+      isInternational: "false",
+      countryOfOriginId: "1",
       password: "Test@1234!"
     },
     signupGeneral: {
@@ -5845,7 +5859,7 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     programName: ["programname", "programme", "program"],
     enrollmentTerm: ["enrollmentterm", "enrolmentterm", "term", "semester", "intake"],
     eventName: ["eventname", "event"],
-    eventCampusId: ["eventcampusid", "campusid"],
+    eventCampusId: ["eventcampusid"],
     eventId: ["eventid"],
     eventTypeAndDate: ["eventtypeanddate", "event_type_and_date", "eventtype"],
     subTours: ["subtours", "subtour"],
@@ -5867,6 +5881,7 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     state: ["state", "province", "region", "administrativearea"],
     postalCode: ["postalcode", "postcode", "postcode", "zipcode", "zip"],
     postCode: ["postcode"],
+    countryId: ["countryid"],
     country: ["country"],
     nationality: ["nationality"],
     website: ["website", "url"],
@@ -5883,7 +5898,6 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     isSpouse: ["isspouse"],
     isFirstVisit: ["isfirstvisit"],
     administrativeAreaId: ["administrativeareaid", "stateid", "provinceid"],
-    countryId: ["countryid"],
     familyConnectionId: ["familyconnectionid"],
     familyCircumstancesIds: ["familycircumstancesids", "familycircumstances"],
     familyTypeIds: ["familytypeids", "familytypes"],
@@ -5893,6 +5907,22 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     siblingsId: ["siblingsid"],
     hasFutureSiblings: ["hasfuturesiblings"],
     hearAboutUsId: ["hearaboutusid"],
+    campusId: ["campusid", "campus"],
+    religionId: ["religionid", "religion"],
+    indigenousStatusId: ["indigenousstatusid", "indigenous"],
+    boardingTypeId: ["boardingtypeid", "boarding"],
+    startingYear: ["startingyear", "startyear"],
+    startingPeriodId: ["startingperiodid", "startperiod"],
+    schoolIntakeYearId: ["schoolintakeyearid", "intakeyear"],
+    classGroups: ["classgroups", "classgroup"],
+    submittedApplication: ["submittedapplication"],
+    currentSchoolId: ["currentschoolid"],
+    currentSchoolYearId: ["currentschoolyearid"],
+    hasSpecialNeeds: ["hasspecialneeds", "specialneeds"],
+    specialNeedsReason: ["specialneedsreason"],
+    otherInterests: ["otherinterests"],
+    isInternational: ["isinternational"],
+    countryOfOriginId: ["countryoforiginid"],
     password: ["password", "passcode"],
     confirmPassword: ["confirmpassword", "passwordconfirm", "repeatpassword"]
   };
@@ -5970,6 +6000,20 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
       siblingsId: "0",
       hasFutureSiblings: "1",
       hearAboutUsId: "1",
+      campusId: "1",
+      religionId: "1",
+      indigenousStatusId: "1",
+      boardingTypeId: "1",
+      startingYear: "1",
+      startingPeriodId: "1",
+      schoolIntakeYearId: "1",
+      classGroups: "1",
+      submittedApplication: "1",
+      currentSchoolId: "",
+      currentSchoolYearId: "1",
+      hasSpecialNeeds: "false",
+      isInternational: "false",
+      countryOfOriginId: "1",
       password: "Test@1234!",
       confirmPassword: "Test@1234!"
     };
@@ -6769,10 +6813,8 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     return false;
   }
   function isAddressLookupField(fieldName) {
-    const key = (getFieldKey(fieldName) || "").toLowerCase();
     const normalized = normalizeKey(fieldName);
-    const joined = `${key} ${normalized}`;
-    return joined.includes("address") && !joined.includes("emailaddress");
+    return normalized.includes("addresslookup") || normalized.includes("placesearch") || normalized.includes("address_lookup");
   }
   function isAddressDependentField(fieldName) {
     const key = (getFieldKey(fieldName) || "").toLowerCase();
@@ -7021,6 +7063,7 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
   }
   function dispatchEvents(element) {
     element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
     element.dispatchEvent(new Event("change", { bubbles: true }));
     element.dispatchEvent(new Event("blur", { bubbles: true }));
   }
@@ -7223,6 +7266,10 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
       const isDisabled = matSelect.getAttribute("aria-disabled") === "true" || matSelect.classList.contains("mat-mdc-select-disabled") || matSelect.classList.contains("mat-select-disabled");
       if (isDisabled || !isElementVisible(matSelect))
         continue;
+      const existingValueText = matSelect.querySelector(".mat-select-value-text, .mat-mdc-select-value-text");
+      if (existingValueText && existingValueText.textContent && !isPlaceholderLike(existingValueText.textContent.trim())) {
+        continue;
+      }
       const fieldName = getFieldName(matSelect);
       if (currentAddressAutocompleteUsed && isAddressDependentField(fieldName)) {
         appendReportDetail(`skip ${fieldName}: address autocomplete owns dependent fields`);
@@ -7246,8 +7293,8 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
       matSelect.click();
       dispatchEvents(matSelect);
       let options = [];
-      for (let i50 = 0; i50 < 10; i50++) {
-        await wait(100);
+      for (let i50 = 0; i50 < 20; i50++) {
+        await wait(150);
         options = getMatOptionCandidates();
         if (options.length > 0)
           break;
@@ -7261,7 +7308,7 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
         continue;
       }
       chosen.click();
-      await wait(140);
+      await wait(220);
       await closeOpenOverlayPanels();
       highlight(matSelect);
       filled++;
@@ -7582,7 +7629,7 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
         break;
       traversed++;
       await waitForStepperTransition();
-      await wait(250);
+      await wait(500);
     }
     return { filled: totalFilled, steps: traversed };
   }
